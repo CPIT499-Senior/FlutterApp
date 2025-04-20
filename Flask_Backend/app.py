@@ -27,9 +27,19 @@ def init_db():
                 timestamp TEXT,
                 region_json_path TEXT,
                 result_json_path TEXT,
-                landmine_count INTEGER
+                landmine_count INTEGER,
+                FOREIGN KEY (user_id) REFERENCES users(id) 
             )
         ''')
+         # Create users table
+        c.execute('''
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT UNIQUE NOT NULL,
+                password TEXT NOT NULL
+            )
+        ''')
+
         conn.commit()
 
 init_db()
