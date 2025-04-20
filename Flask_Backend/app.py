@@ -40,6 +40,7 @@ def get_mission_folder(mission_id):
 
 # 1. Create a new mission
 @app.route('/start-mission', methods=['POST'])
+@app.route('/start-mission', methods=['POST'])
 def start_mission():
     data = request.get_json()
     timestamp = datetime.utcnow().isoformat()
@@ -51,19 +52,42 @@ def start_mission():
         mission_id = c.lastrowid
 
         mission_name = f"Mission {mission_id}"
-        region_json_path = f"missions/mission{mission_id}/input.json"
-
         folder_path = get_mission_folder(mission_id)
         os.makedirs(folder_path, exist_ok=True)
 
+        region_json_path = os.path.join(folder_path, 'input.json')
         with open(region_json_path, 'w') as f:
             json.dump(data, f, indent=2)
 
+        # Update DB with name + input path
         c.execute("UPDATE missions SET name=?, region_json_path=? WHERE id=?",
                   (mission_name, region_json_path, mission_id))
         conn.commit()
 
-    return jsonify({"message": "Mission created", "mission_id": mission_id})
+    # --- Call MATLAB script ---
+    try:
+        subprocess.run(['matlab', '-batch', f"run_simulation({mission_id})"], check=True)
+        print("✅ MATLAB simulation executed.")
+    except subprocess.CalledProcessError as e:
+        print(f"❌ MATLAB failed: {e}")
+        return jsonify({"error": "MATLAB simulation failed"}), 500
+
+    # --- Load result.json and update DB ---
+    result_path = os.path.join(folder_path, 'result.json')
+    if os.path.exists(result_path):
+        with open(result_path) as f:
+            result_data = json.load(f)
+        landmine_count = result_data.get('landmine_count', 0)
+
+        with sqlite3.connect(DB_PATH) as conn:
+            c = conn.cursor()
+            c.execute("UPDATE missions SET result_json_path=?, landmine_count=? WHERE id=?",
+                      (result_path, landmine_count, mission_id))
+            conn.commit()
+    else:
+        return jsonify({"error": "result.json not found"}), 500
+
+    return jsonify({"message": "Mission created and processed", "mission_id": mission_id})
 
 # 2. Upload result.json from MATLAB
 @app.route('/upload-result/<int:mission_id>', methods=['POST'])
